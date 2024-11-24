@@ -1,15 +1,16 @@
-import * as path from "node:path";
-import * as url from "node:url";
-
-import { default as express } from "express";
-import { default as sqlite3 } from "sqlite3";
-import { default as Joi } from "joi";
+import path from "path";
+import url from "url";
+import express from "express";
+import sqlite3 from "sqlite3";
+import Joi from "joi";
+import cors from "cors";
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const db_filename = path.join(__dirname, "db", "stpaul_crime.sqlite3");
 
 let app = express();
 app.use(express.json());
+app.use(cors());
 
 let db = new sqlite3.Database(db_filename, sqlite3.OPEN_READWRITE, (err) => {
   if (err) {
