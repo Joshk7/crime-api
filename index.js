@@ -3,11 +3,10 @@ import * as url from "node:url";
 
 import { default as express } from "express";
 import { default as sqlite3 } from "sqlite3";
+import { default as Joi } from "joi";
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const db_filename = path.join(__dirname, "db", "stpaul_crime.sqlite3");
-
-const port = 8000;
 
 let app = express();
 app.use(express.json());
@@ -56,8 +55,59 @@ function buildFilterClause(filterKey, queryValue) {
   };
 }
 
+const newIncidentSchema = Joi.object({
+  case_number: Joi.string().required(),
+  date: Joi.string()
+    .pattern(/^\d{4}-\d{2}-\d{2}$/) // Ensures the format is YYYY-MM-DD
+    .required(),
+  time: Joi.string()
+    .pattern(/^\d{2}:\d{2}:\d{2}$/) // Ensures the format is HH:MM:SS
+    .required(),
+  code: Joi.number().integer().positive().required(),
+  incident: Joi.string().required(),
+  police_grid: Joi.number().integer().positive().required(),
+  neighborhood_number: Joi.number().integer().positive().required(),
+  block: Joi.string().required(),
+});
+
+const querySchema = Joi.object({
+  code: Joi.string()
+    .pattern(/^\d+(,\d+)*$/) // Comma-separated numeric values
+    .optional(),
+  neighborhood: Joi.string()
+    .pattern(/^\d+(,\d+)*$/) // Comma-separated numeric values
+    .optional(),
+  grid: Joi.string()
+    .pattern(/^\d+(,\d+)*$/) // Comma-separated numeric values
+    .optional(),
+  limit: Joi.number().integer().positive().max(1000).optional(),
+  start_date: Joi.string()
+    .pattern(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  end_date: Joi.string()
+    .pattern(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+});
+
+const removeIncidentSchema = Joi.object({
+  case_number: Joi.string().required(), // Ensure case_number is a non-empty string
+});
+
+function validate(schema, property = "body") {
+  return (req, res, next) => {
+    const { error, value } = schema.validate(req[property]);
+    if (error) {
+      return res
+        .status(400)
+        .send(`Validation Error: ${error.details[0].message}`);
+    }
+    req[property] = value; // Replace with sanitized value
+    next();
+  };
+}
+
 // GET request handler for crime incidents
-app.get("/incidents", (req, res) => {
+app.get("/incidents", validate(querySchema, "query"), (req, res) => {
   let sql = "SELECT * FROM Incidents";
   let params = [];
   const filters = [];
@@ -113,7 +163,7 @@ app.get("/incidents", (req, res) => {
 });
 
 // POST request handler for new crime incident
-app.post("/new-incident", async (req, res) => {
+app.post("/new-incident", validate(newIncidentSchema), async (req, res) => {
   try {
     const newIncident = req.body;
     const params = [
@@ -139,30 +189,34 @@ app.post("/new-incident", async (req, res) => {
 });
 
 // DELETE request handler for new crime incident
-app.delete("/remove-incident", async (req, res) => {
-  try {
-    const caseNumber = req.body.case_number;
-    if (!caseNumber) throw new Error("Case number is required");
+app.delete(
+  "/remove-incident",
+  validate(removeIncidentSchema),
+  async (req, res) => {
+    try {
+      const caseNumber = req.body.case_number;
+      if (!caseNumber) throw new Error("Case number is required");
 
-    const incident = await dbSelect(
-      "SELECT * FROM Incidents WHERE case_number = ?",
-      [caseNumber]
-    );
-    if (incident.length === 0) throw new Error("Case Number Not Found");
+      const incident = await dbSelect(
+        "SELECT * FROM Incidents WHERE case_number = ?",
+        [caseNumber]
+      );
+      if (incident.length === 0) throw new Error("Case Number Not Found");
 
-    await dbRun("DELETE FROM Incidents WHERE case_number = ?", [caseNumber]);
-    console.log(`${caseNumber} has been deleted`);
+      await dbRun("DELETE FROM Incidents WHERE case_number = ?", [caseNumber]);
 
-    res
-      .status(200)
-      .type("txt")
-      .send(`Case number ${caseNumber} has been deleted.`);
-  } catch (error) {
-    console.error(error.message);
-    res.status(500).type("txt").send(error.message);
+      res
+        .status(200)
+        .type("txt")
+        .send(`Case number ${caseNumber} has been deleted.`);
+    } catch (error) {
+      console.error(error.message);
+      res.status(500).type("txt").send(error.message);
+    }
   }
-});
+);
 
+const port = process.env.PORT || 8000;
 app.listen(port, () => {
-  console.log("Now listening on port " + port);
+  console.log(`Now listening on port ${port}`);
 });
